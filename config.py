@@ -1,0 +1,24 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+
+# -------------------------
+# RAG SETTINGS
+# -------------------------
+
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 150
+TOP_K = 3
+
+# -------------------------
+# CHROMADB SETTINGS
+# -------------------------
+
+APP_TITLE = "YouTube RAG Chatbot"
+APP_DESCRIPTION = "Chat with any YouTube video using RAG"
+GEMINI_MODEL = "gemini-3.1-pro-preview"
+EMBEDDING_MODEL = "models/text-embedding-004"
+CHROMA_DB_PATH = "data/chroma_db"
