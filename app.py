@@ -1,5 +1,13 @@
 import streamlit as st 
-from services import generate_video_notes, generate_rag_answer
+from services import (generate_video_notes, 
+                      generate_rag_answer,
+                      extract_video_id,
+                      get_transcript,
+                      chunk_transcript,
+                      store_in_chromadb,
+                      retrieve_relevant_chunks,
+                      translate_transcript_to_language_code,
+                      get_transcript_language_code)
 
 # -------------------------
 # PAGE CONFIG
@@ -39,9 +47,9 @@ with st.sidebar:
         placeholder="https://www.youtube.com/watch?v=..."
     )
     
-    language_code = st.text_input(
+    note_language_code = st.text_input(
         "Video Language Code",
-        value="en"
+        placeholder="en"
     )
     
     task_type = st.radio(
@@ -72,27 +80,29 @@ if start_button:
         st.warning("Please enter a YouTube URL first.")
 
     elif task_type == "Notes For You":
-        with st.status("Processing video ...", expanded=True) as status:
-            
-            st.write("Step 1/3: Fetching transcript...")
-
-            if language_code.lower() != "en":
-                st.write("Step 1.5/3: Translating transcript into English...")
-            
-            st.write("Step 2/3: Generating key topics and notes...")
-            st.write("Step 3/3: Finalizing output...")
-
+        video_id = extract_video_id(youtube_url) 
         
-            st.session_state.notes_result = generate_video_notes(
-                youtube_url,
-                language_code
-            )
+        if not video_id:
+            st.error("Invalid YouTube URL.")
+            st.stop()
 
-            status.update(
-                label="Video processed successfully!",
-                state="complete"
-            )
-
+        with st.status("Processing video ...", expanded=True) as status:
+            with st.spinner("Step 1/3: Fetching transcript..."):
+                transcript_language_code = get_transcript_language_code(video_id) 
+                transcript = get_transcript(video_id, transcript_language_code)
+            
+            with st.spinner(f"Step 1.5/3: Translating transcript into {note_language_code} , This may take few moments..."):
+                    transcript = translate_transcript_to_language_code(transcript, transcript_language_code, note_language_code)
+                    
+            with st.spinner("Step 2/3: Generating key topics and notes..."):
+                    study_notes_result = generate_video_notes(transcript, note_language_code)
+            
+            with st.spinner("Step 3/3: Finalizing output..."):
+                    st.session_state.notes_result = (
+                    study_notes_result
+                    )
+                    st.success("Video processed successfully!")
+            
     else:
         st.info("Chat with Video will be added after Notes For You works.")
         
