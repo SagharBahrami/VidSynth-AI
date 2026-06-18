@@ -1,63 +1,383 @@
 # 🎬 VidSynth AI
 
-VidSynth AI is a Streamlit application that transforms YouTube videos into AI-generated study notes, summaries, key topics, and later an interactive video chatbot using RAG.
+VidSynth AI is an AI-powered Streamlit application that transforms YouTube videos into study notes, searchable video chat, and audio-assisted learning.
 
-## 🚀 Features
+Users can paste a YouTube URL, generate organized notes, chat with the video using RAG, ask questions by voice, and listen to audio versions of generated content.
 
-### Current Features
+---
 
-- Accepts a YouTube video URL
-- Fetches the video transcript
-- Generates study notes from the transcript
-- Creates a short summary
-- Extracts key topics and key notes
-- Displays results in a clean Streamlit interface
+## ✨ Features
 
-### Planned Features
+### 📝 Notes For You
 
-- Chat with a YouTube video using RAG
-- Store transcript chunks in ChromaDB
-- Retrieve relevant chunks based on user questions
-- Generate answers using Gemini
-- Add podcast/audio generation
-- Improve transcript language support
+Generate structured study notes from a YouTube video transcript.
 
-## 🧠 What is RAG?
+The notes include:
 
-RAG stands for **Retrieval-Augmented Generation**.
+- Short Summary
+- Key Topics
+- Content Outline
+- Detailed Study Notes
+- Important Takeaways
 
-In this project, RAG means:
+Users can choose the language of the generated notes by entering a language code such as:
 
-1. Get the YouTube transcript
-2. Split the transcript into chunks
-3. Convert chunks into embeddings
-4. Store chunks in ChromaDB
-5. Retrieve the most relevant chunks for a user question
-6. Send those chunks to Gemini
-7. Generate an answer based on the video content
+```text
+en
+fa
+es
+fr
+ar
+```
+
+---
+
+### 💬 Chat with Video
+
+Chat with a YouTube video after processing its transcript.
+
+The app uses RAG, which stands for:
+
+```text
+Retrieval-Augmented Generation
+```
+
+The chat flow is:
+
+```text
+YouTube transcript
+→ Translate transcript if needed
+→ Split transcript into chunks
+→ Store chunks in ChromaDB
+→ User asks a question
+→ Retrieve relevant chunks
+→ Gemini generates an answer
+```
+
+This helps the chatbot answer based on the video transcript instead of giving unrelated general answers.
+
+---
+
+### 🎙️ Voice Questions
+
+Users can ask questions using their microphone.
+
+The app records the user's voice, converts the audio into text, and sends the transcribed question to the same RAG pipeline used for typed questions.
+
+Flow:
+
+```text
+Voice question
+→ Speech-to-text
+→ Retrieve relevant transcript chunks
+→ Generate answer
+```
+
+---
+
+### 🔊 Audio Generation
+
+VidSynth AI can generate audio from AI-generated text.
+
+Current audio support includes:
+
+- Audio version of study notes
+- Audio version of chatbot answers
+
+The app uses `gTTS` for text-to-speech.
+
+Generated audio files are saved locally in:
+
+```text
+data/audio/
+```
+
+If a selected language is not supported by the audio provider, the app can generate English audio instead.
+
+---
+
+### 🌍 Multilingual Support
+
+VidSynth AI separates two different language concepts:
+
+```text
+Transcript language = the language available from YouTube captions
+Note / response language = the language selected by the user
+```
+
+The app can fetch the available transcript, translate it into the selected response language, and then generate notes or build a chat knowledge base.
+
+---
+
+## 🧠 How It Works
+
+### Notes Generation Flow
+
+```text
+YouTube URL
+→ Extract video ID
+→ Detect transcript language
+→ Fetch transcript
+→ Translate transcript if needed
+→ Generate structured notes with Gemini
+→ Optionally generate audio
+```
+
+### Chat with Video Flow
+
+```text
+YouTube URL
+→ Extract video ID
+→ Detect transcript language
+→ Fetch transcript
+→ Translate transcript if needed
+→ Split transcript into chunks
+→ Store chunks in ChromaDB
+→ User asks a typed or voice question
+→ Retrieve relevant chunks
+→ Generate answer with Gemini
+→ Optionally generate audio answer
+```
+
+---
 
 ## 🛠️ Tech Stack
 
 - Python
 - Streamlit
-- Gemini API
 - LangChain
+- Google Gemini
 - ChromaDB
 - YouTube Transcript API
+- gTTS
+- SpeechRecognition
 - python-dotenv
+
+---
 
 ## 📁 Project Structure
 
 ```text
-project3/
-│
+VidSynth-AI/
 ├── app.py
 ├── services.py
-├── config.py
 ├── prompts.py
+├── config.py
 ├── requirements.txt
-├── .env
 ├── README.md
-│
+├── .env
 └── data/
-    └── chroma_db/
+    ├── chroma_db/
+    └── audio/
+```
+
+### File Responsibilities
+
+| File | Purpose |
+|---|---|
+| `app.py` | Streamlit user interface and app workflow |
+| `services.py` | Transcript extraction, translation, RAG, audio generation, and speech-to-text functions |
+| `prompts.py` | Prompt templates for notes, translation, and RAG answers |
+| `config.py` | API keys, model names, chunk settings, and ChromaDB path |
+| `requirements.txt` | Python dependencies |
+
+---
+
+## ⚙️ Installation
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/SagharBahrami/VidSynth-AI.git
+cd VidSynth-AI
+```
+
+### 2. Create a virtual environment
+
+Windows:
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+macOS / Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 🔐 Environment Variables
+
+Create a `.env` file in the root directory.
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+YOUTUBE_API_KEY=your_youtube_api_key_here
+```
+
+Do not push your `.env` file to GitHub.
+
+Add this to `.gitignore`:
+
+```gitignore
+.env
+.venv/
+__pycache__/
+data/chroma_db/
+data/audio/
+```
+
+---
+
+## ▶️ Run the App
+
+```bash
+streamlit run app.py
+```
+
+Then open the local Streamlit URL in your browser.
+
+Usually it will be:
+
+```text
+http://localhost:8501
+```
+
+---
+
+## 🧪 How to Use
+
+### Generate Notes
+
+1. Paste a YouTube URL.
+2. Enter the desired note language code.
+3. Select `Notes For You`.
+4. Click `✨ Start Processing`.
+5. Read the generated notes.
+6. Optionally generate an audio version.
+
+---
+
+### Chat with a Video
+
+1. Paste a YouTube URL.
+2. Enter the desired response language code.
+3. Select `Chat with Video`.
+4. Click `✨ Start Processing`.
+5. Ask questions using text or voice.
+6. Read or listen to the AI response.
+
+---
+
+## 🔎 RAG Explanation
+
+RAG stands for:
+
+```text
+Retrieval-Augmented Generation
+```
+
+In VidSynth AI, RAG works like this:
+
+### 1. Retrieval
+
+The app searches ChromaDB for transcript chunks related to the user's question.
+
+### 2. Augmented
+
+The retrieved transcript chunks are added to the prompt.
+
+### 3. Generation
+
+Gemini generates an answer using the retrieved transcript context.
+
+This allows the chatbot to answer questions based on the actual video content.
+
+---
+
+## 🎧 Audio Features
+
+VidSynth AI uses `gTTS` to generate MP3 audio from text.
+
+Audio can be generated for:
+
+- Study notes
+- Chatbot answers
+
+Generated audio files are saved in:
+
+```text
+data/audio/
+```
+
+Some languages may not be supported by `gTTS`. In that case, the app can generate English audio instead.
+
+---
+
+## 🎙️ Voice Question Feature
+
+VidSynth AI uses `SpeechRecognition` to convert recorded voice questions into text.
+
+The voice question flow is:
+
+```text
+Record audio
+→ Convert speech to text
+→ Send text question to RAG
+→ Generate AI answer
+```
+
+For best results, the spoken question language should match the selected response language code.
+
+---
+
+## ⚠️ Limitations
+
+- The YouTube video must have an available transcript or captions.
+- Speech recognition accuracy depends on microphone quality, background noise, and language support.
+- gTTS language support may vary by language.
+- ChromaDB data is stored locally.
+- Generated audio files are stored locally.
+- Very long videos may take more time to translate, chunk, embed, and process.
+
+---
+
+## 🚀 Future Improvements
+
+Possible future improvements:
+
+- Podcast-style audio generation
+- Better audio voice options
+- Better UI styling
+- Source chunk display for chatbot answers
+- Chat history export
+- More advanced multilingual speech support
+- Streamlit Cloud deployment
+- User authentication
+- Automatic cleanup for old generated audio files
+
+---
+
+## 👩‍💻 Author
+
+Built by **Saghar Bahrami**.
+
+GitHub: [SagharBahrami](https://github.com/SagharBahrami)
+
+---
+
+## 📄 License
+
+This project is for educational and portfolio purposes.
+
+A license file can be added later to define usage permissions more clearly.
