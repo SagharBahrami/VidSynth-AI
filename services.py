@@ -6,11 +6,10 @@ from config import (GEMINI_MODEL,
                     TOP_K,
                     CHROMA_DB_PATH,
                     EMBEDDING_MODEL, 
-                    GEMINI_API_KEY
+                    GOOGLE_API_KEY
                     )
 
 from prompts import RAG_PROMPT, NOTES_PROMPT, TRANSLATION_PROMPT
-
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
@@ -19,14 +18,19 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
 
+from gtts import gTTS
+from gtts.lang import tts_langs
+import speech_recognition as sr
+import tempfile
+import os
 embedding_model = GoogleGenerativeAIEmbeddings(
     model=EMBEDDING_MODEL,
-    google_api_key=GEMINI_API_KEY
+    google_api_key=GOOGLE_API_KEY
 )
 
 llm = ChatGoogleGenerativeAI(
     model=GEMINI_MODEL,
-    google_api_key=GEMINI_API_KEY
+    google_api_key=GOOGLE_API_KEY
 )
 
 def extract_video_id(url: str) -> str | None:
@@ -207,3 +211,95 @@ def generate_rag_answer(question, relevant_chunks: list[Document], note_language
     
     return answer
 
+def generate_audio_from_text(text: str, language_code: str, video_id: str, audio_type, output_folder: str = "data/audio"):
+    
+    if not text:
+        raise ValueError("Note is empty to generate audion of it!")
+    
+    if not video_id:
+        raise ValueError("Video ID is empty. Cannot name audio file.")
+    
+    note_language_code = language_code.strip().lower()
+    
+    supported_languages = tts_langs()
+    
+    audio_text = text
+    audio_language_code = language_code
+    
+    
+    if language_code not in supported_languages:
+        
+        audio_text = translation_chain.invoke({
+            "transcript": text,
+            "transcript_language_code": language_code,
+            "note_language_code": "en"
+        })
+    
+   
+    
+        audio_language_code = "en"
+
+    os.makedirs(output_folder, exist_ok=True)
+
+    output_path = os.path.join(
+        output_folder,
+        f"{video_id}_{audio_type}_{audio_language_code}.mp3"
+    )
+
+    tts = gTTS(
+        text=audio_text,
+        lang=audio_language_code
+    )
+
+    tts.save(output_path)
+
+    return output_path, audio_language_code
+
+def get_speech_language_code(language_code: str) -> str:
+    
+    language_code = language_code.strip().lower()
+    
+    language_map = {
+        "en": "en-US",
+        "fa": "fa-IR",
+        "es": "es-ES",
+        "fr": "fr-FR",
+        "ar": "ar-SA",
+        "de": "de-DE",
+        "it": "it-IT",
+    }
+
+    return language_map.get(language_code, language_code)
+
+def convert_audio_to_text(audio_file, language_code: str):
+    
+    if audio_file is None:
+        raise ValueError("No audio file found!")
+    
+    recognizer = sr.Recognizer()
+    
+    speech_language_code = get_speech_language_code(language_code)
+    
+    audio_bytes = audio_file.getvalue()
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+        temp_audio.write(audio_bytes)
+        temp_audio_path = temp_audio.name
+        
+    try:
+        with sr.AudioFile(temp_audio_path) as source:
+            audio_data = recognizer.record(source)
+        text = recognizer.recognize_google(
+            audio_data,
+            language=speech_language_code
+
+        )
+        return text
+    except sr.UnknownValueError:
+        raise ValueError("Sorry, I could not understand the audio.")
+    except sr.RequestError:
+        raise ValueError("Speech recognition service is unavailable right now.")
+
+    finally:
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)            

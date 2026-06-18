@@ -5,6 +5,7 @@ google-genai
 google-generativeai
 pillow
 gTTS
+SpeechRecognition
 langchain
 langchain-google-genai
 langchain-text-splitters
