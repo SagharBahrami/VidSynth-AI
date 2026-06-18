@@ -190,7 +190,7 @@ rag_chain = (
 )
 
 
-def generate_rag_answer(question, relevant_chunks: list[Document]) -> str:
+def generate_rag_answer(question, relevant_chunks: list[Document], note_language_code: str) -> str:
     if not question:
         raise ValueError("Question is empty")
     
@@ -201,7 +201,8 @@ def generate_rag_answer(question, relevant_chunks: list[Document]) -> str:
     )
     answer = rag_chain.invoke({
         "context": context,
-        "question": question
+        "question": question,
+        "note_language_code": note_language_code
     })
     
     return answer

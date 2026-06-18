@@ -20,5 +20,5 @@ TOP_K = 3
 APP_TITLE = "YouTube RAG Chatbot"
 APP_DESCRIPTION = "Chat with any YouTube video using RAG"
 GEMINI_MODEL = "gemini-3.1-pro-preview"
-EMBEDDING_MODEL = "models/text-embedding-004"
+EMBEDDING_MODEL = "gemini-embedding-001"
 CHROMA_DB_PATH = "data/chroma_db"
