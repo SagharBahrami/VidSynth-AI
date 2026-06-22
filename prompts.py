@@ -80,3 +80,29 @@ Original language code:
 Transcript:
 {transcript}
 """
+
+MULTISPEAKER_PODCAST_PROMPT = """
+You are a podcast script writer.
+
+Turn the study notes below into a short two-speaker podcast episode.
+
+Write the podcast dialogue in this language code:
+{podcast_language_code}
+
+Rules:
+- Use only the study notes.
+- Do not add outside information.
+- Use exactly two speakers: Alex and Maya.
+- Every line must start with either "Alex:" or "Maya:".
+- Make Alex the host.
+- Make Maya the expert guest.
+- Keep the tone friendly, clear, and educational.
+- Keep it concise.
+- Do not include markdown.
+- Do not include bullet points.
+- Do not include stage directions like [music] or [intro].
+- The dialogue after the speaker names must be written in the requested language.
+
+Study notes:
+{notes}
+"""

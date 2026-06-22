@@ -96,6 +96,37 @@ If a selected language is not supported by the audio provider, the app can gener
 
 ---
 
+### 🎙️ Podcast (Multi-Speaker)
+
+VidSynth AI can turn a YouTube video into a short two-speaker podcast episode.
+
+The app generates a natural conversation between two speakers:
+
+```text
+Alex — the host
+Maya — the expert guest
+```
+
+The podcast flow is:
+
+```text
+YouTube transcript
+→ Translate transcript if needed
+→ Generate study notes with Gemini
+→ Write a two-speaker podcast script with Gemini
+→ Synthesize multi-speaker audio with Gemini text-to-speech
+```
+
+Unlike the `gTTS` audio (which produces a single MP3 voice), the podcast uses
+Google Gemini's multi-speaker text-to-speech to give each speaker a distinct
+voice. The generated podcast is saved as a `.wav` file in `data/audio/`, and the
+script is also viewable in the app.
+
+> The podcast feature uses Gemini's paid text-to-speech model, so a billing-enabled
+> Google API key is required to generate podcast audio.
+
+---
+
 ### 🌍 Multilingual Support
 
 VidSynth AI separates two different language concepts:
@@ -139,6 +170,20 @@ YouTube URL
 → Optionally generate audio answer
 ```
 
+### Podcast Generation Flow
+
+```text
+YouTube URL
+→ Extract video ID
+→ Detect transcript language
+→ Fetch transcript
+→ Translate transcript if needed
+→ Generate study notes with Gemini
+→ Write a two-speaker podcast script with Gemini
+→ Synthesize multi-speaker audio with Gemini text-to-speech
+→ Play and download the podcast
+```
+
 ---
 
 ## 🛠️ Tech Stack
@@ -146,7 +191,7 @@ YouTube URL
 - Python
 - Streamlit
 - LangChain
-- Google Gemini
+- Google Gemini (text + multi-speaker text-to-speech)
 - ChromaDB
 - YouTube Transcript API
 - gTTS
@@ -176,9 +221,9 @@ VidSynth-AI/
 | File | Purpose |
 |---|---|
 | `app.py` | Streamlit user interface and app workflow |
-| `services.py` | Transcript extraction, translation, RAG, audio generation, and speech-to-text functions |
-| `prompts.py` | Prompt templates for notes, translation, and RAG answers |
-| `config.py` | API keys, model names, chunk settings, and ChromaDB path |
+| `services.py` | Transcript extraction, translation, RAG, audio generation, podcast generation, and speech-to-text functions |
+| `prompts.py` | Prompt templates for notes, translation, RAG answers, and the multi-speaker podcast script |
+| `config.py` | API keys, model names (including the Gemini TTS model and podcast speaker voices), chunk settings, and ChromaDB path |
 | `requirements.txt` | Python dependencies |
 
 ---
@@ -221,9 +266,11 @@ pip install -r requirements.txt
 Create a `.env` file in the root directory.
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
-YOUTUBE_API_KEY=your_youtube_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here
 ```
+
+The key must belong to a Google project with **billing enabled** to use the
+podcast (multi-speaker text-to-speech) feature.
 
 Do not push your `.env` file to GitHub.
 
@@ -276,6 +323,17 @@ http://localhost:8501
 4. Click `✨ Start Processing`.
 5. Ask questions using text or voice.
 6. Read or listen to the AI response.
+
+---
+
+### Generate a Podcast
+
+1. Paste a YouTube URL.
+2. Enter the desired podcast language code.
+3. Select `Podcast`.
+4. Click `✨ Start Processing`.
+5. Listen to the generated two-speaker podcast.
+6. Download the `.wav` file or expand the script to read it.
 
 ---
 
@@ -356,7 +414,7 @@ For best results, the spoken question language should match the selected respons
 
 Possible future improvements:
 
-- Podcast-style audio generation
+- More than two podcast speakers
 - Better audio voice options
 - Better UI styling
 - Source chunk display for chatbot answers

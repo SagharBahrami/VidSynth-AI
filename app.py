@@ -10,7 +10,7 @@ from services import (generate_video_notes,
                       get_transcript_language_code,
                       generate_audio_from_text,
                       convert_audio_to_text,
-                      generate_audio_from_text)
+                      generate_podcast_from_video)
 
 # -------------------------
 # PAGE CONFIG
@@ -54,6 +54,12 @@ if "voice_mode" not in st.session_state:
 
 if "processed_audio_hash" not in st.session_state:
     st.session_state.processed_audio_hash = None
+
+if "podcast_audio_path" not in st.session_state:
+    st.session_state.podcast_audio_path = None
+
+if "podcast_script" not in st.session_state:
+    st.session_state.podcast_script = None
 # -------------------------
 #SIDEBAR 
 # -------------------------
@@ -81,7 +87,7 @@ with st.sidebar:
     
     task_type = st.radio(
         "Choose what you want to generate:",
-        ["Chat with Video", "Notes For You"]
+        ["Chat with Video", "Notes For You", "Podcast"]
 
     )
     
@@ -132,8 +138,40 @@ if start_button:
                 st.success("Video processed successfully!")
                     
                 
+    elif task_type == "Podcast":
+        st.session_state.video_id = extract_video_id(youtube_url)
+
+        if not st.session_state.video_id:
+            st.error("Invalid YouTube URL.")
+            st.stop()
+
+        with st.status("Generating podcast ...", expanded=True) as status:
+            with st.spinner("Step 1/4: Fetching transcript..."):
+                st.session_state.transcript_language_code = get_transcript_language_code(st.session_state.video_id)
+                st.session_state.transcript = get_transcript(st.session_state.video_id, st.session_state.transcript_language_code)
+
+            with st.spinner(f"Step 2/4: Translating transcript into {note_language_code}..."):
+                st.session_state.transcript = translate_transcript_to_language_code(st.session_state.transcript, st.session_state.transcript_language_code, note_language_code)
+
+            with st.spinner("Step 3/4: Writing the podcast script..."):
+                st.session_state.podcast_audio_path = None
+                st.session_state.podcast_script = None
+
+            with st.spinner("Step 4/4: Generating multi-speaker audio (this may take a moment)..."):
+                podcast_audio_path, podcast_script = generate_podcast_from_video(
+                    st.session_state.transcript,
+                    st.session_state.video_id,
+                    note_language_code
+                )
+                st.session_state.podcast_audio_path = podcast_audio_path
+                st.session_state.podcast_script = podcast_script
+
+            status.update(label="Podcast generated successfully!", state="complete")
+
+        st.success("Podcast is ready below!")
+
     elif task_type == "Chat with Video":
-            
+
         st.session_state.video_id = extract_video_id(youtube_url)
 
         if not st.session_state.video_id:
@@ -267,8 +305,30 @@ if task_type == "Notes For You":
 #                 "role": "assistant",
 #                 "content": answer
 #             })
+elif task_type == "Podcast":
+    st.subheader("🎙️ Podcast")
+
+    if st.session_state.podcast_audio_path is None:
+        st.info("Click Start Processing to generate a podcast from the video.")
+    else:
+        with open(st.session_state.podcast_audio_path, "rb") as audio_file:
+            audio_bytes = audio_file.read()
+
+        st.audio(audio_bytes, format="audio/wav")
+
+        st.download_button(
+            "⬇️ Download Podcast",
+            data=audio_bytes,
+            file_name=f"{st.session_state.video_id}_podcast.wav",
+            mime="audio/wav"
+        )
+
+        if st.session_state.podcast_script:
+            with st.expander("📄 View podcast script"):
+                st.markdown(st.session_state.podcast_script)
+
 elif task_type == "Chat with Video":
-    
+
     st.subheader("💬 Chat with Video")
 
     if not st.session_state.video_ready_for_chat:
@@ -350,8 +410,8 @@ elif task_type == "Chat with Video":
                     try:
                         answer_audio_path, audio_language_code = generate_audio_from_text(
                             answer,
-                            st.session_state.video_id,
                             note_language_code,
+                            st.session_state.video_id,
                             "chat_answer"
                         )
 

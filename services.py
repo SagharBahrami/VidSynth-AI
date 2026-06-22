@@ -1,15 +1,17 @@
 from urllib.parse import urlparse, parse_qs
 from youtube_transcript_api import YouTubeTranscriptApi
-from config import (GEMINI_MODEL, 
-                    CHUNK_OVERLAP, 
-                    CHUNK_SIZE, 
+from config import (GEMINI_MODEL,
+                    CHUNK_OVERLAP,
+                    CHUNK_SIZE,
                     TOP_K,
                     CHROMA_DB_PATH,
-                    EMBEDDING_MODEL, 
-                    GOOGLE_API_KEY
+                    EMBEDDING_MODEL,
+                    GOOGLE_API_KEY,
+                    GEMINI_TTS_MODEL,
+                    PODCAST_SPEAKER_VOICES
                     )
 
-from prompts import RAG_PROMPT, NOTES_PROMPT, TRANSLATION_PROMPT
+from prompts import RAG_PROMPT, NOTES_PROMPT, TRANSLATION_PROMPT, MULTISPEAKER_PODCAST_PROMPT
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
@@ -23,6 +25,11 @@ from gtts.lang import tts_langs
 import speech_recognition as sr
 import tempfile
 import os
+import wave
+
+from google import genai
+from google.genai import types
+
 embedding_model = GoogleGenerativeAIEmbeddings(
     model=EMBEDDING_MODEL,
     google_api_key=GOOGLE_API_KEY
@@ -32,6 +39,10 @@ llm = ChatGoogleGenerativeAI(
     model=GEMINI_MODEL,
     google_api_key=GOOGLE_API_KEY
 )
+
+# Raw google-genai client used for multi-speaker text-to-speech.
+# (langchain does not expose Gemini's audio output, so we call the SDK directly.)
+genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 def extract_video_id(url: str) -> str | None:
     
@@ -302,4 +313,115 @@ def convert_audio_to_text(audio_file, language_code: str):
 
     finally:
         if os.path.exists(temp_audio_path):
-            os.remove(temp_audio_path)            
+            os.remove(temp_audio_path)    
+
+multispeaker_podcast_prompt = ChatPromptTemplate.from_template(
+    MULTISPEAKER_PODCAST_PROMPT
+)          
+
+multispeaker_podcast_chain = (
+    multispeaker_podcast_prompt
+    | llm
+    | RunnableLambda(extract_response_text)
+)
+            
+def generate_multispeaker_podcast_script(notes: str, podcast_language_code: str = "en") -> str:
+    
+    if not notes:
+        raise ValueError("Notes are empty. Cannot generate podcast script.")
+    
+    podcast_script = multispeaker_podcast_chain.invoke({
+        "notes": notes,
+        "podcast_language_code": podcast_language_code
+    })
+    
+    return podcast_script
+
+
+# Helper to save audio
+def save_wave_file(filename: str, pcm_data, channels: int = 1, rate: int = 24000, sample_width: int = 2) -> None:
+    if not filename:
+        raise ValueError("Filename is required.")
+
+    if pcm_data is None:
+        raise ValueError("Audio data is required.")
+
+    if channels <= 0:
+        raise ValueError("Channels must be greater than 0.")
+
+    if rate <= 0:
+        raise ValueError("Sample rate must be greater than 0.")
+
+    if sample_width <= 0:
+        raise ValueError("Sample width must be greater than 0.")
+
+    output_folder = os.path.dirname(filename)
+    if output_folder:
+        os.makedirs(output_folder, exist_ok=True)
+
+    audio_bytes = bytes(pcm_data)
+
+    with wave.open(filename, "wb") as wave_file:
+        wave_file.setnchannels(channels)
+        wave_file.setsampwidth(sample_width)
+        wave_file.setframerate(rate)
+        wave_file.writeframes(audio_bytes)
+
+
+def generate_podcast_audio(podcast_script: str, video_id: str, output_folder: str = "data/audio") -> str:
+
+    if not podcast_script:
+        raise ValueError("Podcast script is empty. Cannot generate podcast audio.")
+
+    if not video_id:
+        raise ValueError("Video ID is empty. Cannot name podcast file.")
+
+    # One voice config per speaker. The speaker names must match the names
+    # produced by MULTISPEAKER_PODCAST_PROMPT (Alex and Maya).
+    speaker_voice_configs = [
+        types.SpeakerVoiceConfig(
+            speaker=speaker,
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+            ),
+        )
+        for speaker, voice_name in PODCAST_SPEAKER_VOICES.items()
+    ]
+
+    response = genai_client.models.generate_content(
+        model=GEMINI_TTS_MODEL,
+        contents=podcast_script,
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                multi_speaker_voice_config=types.MultiSpeakerVoiceConfig(
+                    speaker_voice_configs=speaker_voice_configs
+                )
+            ),
+        ),
+    )
+
+    # Gemini TTS returns raw PCM audio (24 kHz, 16-bit, mono).
+    pcm_data = response.candidates[0].content.parts[0].inline_data.data
+
+    os.makedirs(output_folder, exist_ok=True)
+    output_path = os.path.join(output_folder, f"{video_id}_podcast.wav")
+
+    save_wave_file(output_path, pcm_data)
+
+    return output_path
+
+
+def generate_podcast_from_video(transcript: str, video_id: str, podcast_language_code: str = "en", output_folder: str = "data/audio") -> tuple[str, str]:
+
+    if not transcript:
+        raise ValueError("Transcript is empty. Cannot generate podcast.")
+
+    if not video_id:
+        raise ValueError("Video ID is empty. Cannot generate podcast.")
+
+    notes = generate_video_notes(transcript, podcast_language_code)
+    podcast_script = generate_multispeaker_podcast_script(notes, podcast_language_code)
+    audio_path = generate_podcast_audio(podcast_script, video_id, output_folder)
+
+    return audio_path, podcast_script
