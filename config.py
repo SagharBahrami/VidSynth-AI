@@ -35,4 +35,6 @@ GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 PODCAST_SPEAKER_VOICES = {
     "Alex": "Puck",   # host
     "Maya": "Kore",   # expert guest
+    "Sam" : "Orus",   # expert guest
+    "Doreen": "Achernar", # expert guest
 }

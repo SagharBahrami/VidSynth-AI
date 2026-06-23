@@ -84,18 +84,19 @@ Transcript:
 MULTISPEAKER_PODCAST_PROMPT = """
 You are a podcast script writer.
 
-Turn the study notes below into a short two-speaker podcast episode.
+Turn the study notes below into a short podcast episode.
 
 Write the podcast dialogue in this language code:
 {podcast_language_code}
 
+{speaker_section}
+
 Rules:
 - Use only the study notes.
 - Do not add outside information.
-- Use exactly two speakers: Alex and Maya.
-- Every line must start with either "Alex:" or "Maya:".
-- Make Alex the host.
-- Make Maya the expert guest.
+- Every line must start with one of the speaker names listed above, followed by a colon (for example "Alex:").
+- Only use the speaker names listed above. Do not invent new speakers.
+- The host guides the conversation and asks questions; each guest answers about their own specialty.
 - Keep the tone friendly, clear, and educational.
 - Keep it concise.
 - Do not include markdown.
@@ -105,4 +106,32 @@ Rules:
 
 Study notes:
 {notes}
+"""
+
+SPEAKER_PLAN_PROMPT = """
+You are a script analyzer.
+
+Read the transcript below and identify the major topics it covers.
+For each major topic, decide what kind of specialist would best speak about it.
+
+Rules:
+- Use only the transcript. Do not add outside information.
+- Identify AT MOST 3 major topics.
+- Preserve the order in which the topics appear in the transcript.
+- If the transcript only covers one subject, return just one topic.
+- specialist_role must be a short job-like title, for example "machine learning engineer" or "historian".
+
+Return your answer as valid JSON in EXACTLY this format:
+{{
+  "topics": [
+    {{"topic": "the subject discussed", "specialist_role": "the kind of expert who would speak on it"}}
+  ]
+}}
+
+Return ONLY the JSON.
+Do not include any explanation.
+Do not wrap the JSON in markdown code fences.
+
+Transcript:
+{transcript}
 """

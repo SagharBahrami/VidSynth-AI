@@ -11,10 +11,11 @@ from config import (GEMINI_MODEL,
                     PODCAST_SPEAKER_VOICES
                     )
 
-from prompts import RAG_PROMPT, NOTES_PROMPT, TRANSLATION_PROMPT, MULTISPEAKER_PODCAST_PROMPT
+from prompts import RAG_PROMPT, NOTES_PROMPT, TRANSLATION_PROMPT, MULTISPEAKER_PODCAST_PROMPT, SPEAKER_PLAN_PROMPT
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
+from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -324,15 +325,73 @@ multispeaker_podcast_chain = (
     | llm
     | RunnableLambda(extract_response_text)
 )
+
+
+# Chain that asks Gemini to read the transcript and return the major topics as
+# JSON. JsonOutputParser turns that JSON text into a Python dict for us, so the
+# result is a real dict (not a string we have to parse by hand).
+speaker_plan_prompt = ChatPromptTemplate.from_template(SPEAKER_PLAN_PROMPT)
+speaker_plan_chain = (
+    speaker_plan_prompt
+    | llm
+    | JsonOutputParser()
+)
+
+
+def build_speaker_section(speakers: list) -> str:
+    # speakers is a list of (name, role, voice) tuples, with the host first.
+    # We turn it into instruction text that gets injected into the podcast prompt.
+    names = [name for name, role, voice in speakers]
+
+    lines = [f"Use exactly {len(speakers)} speakers: {', '.join(names)}."]
+    for name, role, voice in speakers:
+        lines.append(f"- {name} is the {role}.")
+
+    return "\n".join(lines)
+
+
+def plan_speakers(transcript: str) -> list:
+    # Ask Gemini which major topics the transcript covers. Each topic becomes a
+    # specialist guest; the first roster voice is always the host.
+    try:
+        plan = speaker_plan_chain.invoke({"transcript": transcript})
+        topics = plan["topics"]
+    except Exception:
+        # If the analysis call fails or returns invalid JSON, fall back to a
+        # single generic guest so the podcast still works (2 speakers total).
+        # Never let an unpredictable LLM response crash the whole feature.
+        topics = [{"specialist_role": "expert"}]
+
+    # Enforce the cap in code too: at most 3 specialists (+ 1 host = 4 speakers).
+    topics = topics[:3]
+    if not topics:
+        topics = [{"specialist_role": "expert"}]
+
+    roster = list(PODCAST_SPEAKER_VOICES.items())  # ordered [(name, voice), ...]
+
+    # The first roster entry is always the host (no specialist topic).
+    host_name, host_voice = roster[0]
+    speakers = [(host_name, "host", host_voice)]
+
+    # One guest per topic, taking the next available voice from the roster.
+    for index, topic in enumerate(topics):
+        guest_name, guest_voice = roster[1 + index]
+        role = topic.get("specialist_role", "expert")
+        speakers.append((guest_name, role, guest_voice))
+
+    return speakers
             
-def generate_multispeaker_podcast_script(notes: str, podcast_language_code: str = "en") -> str:
+def generate_multispeaker_podcast_script(notes: str, speakers: list, podcast_language_code: str = "en") -> str:
     
     if not notes:
         raise ValueError("Notes are empty. Cannot generate podcast script.")
     
+    speaker_section = build_speaker_section(speakers)
+
     podcast_script = multispeaker_podcast_chain.invoke({
         "notes": notes,
-        "podcast_language_code": podcast_language_code
+        "podcast_language_code": podcast_language_code,
+        "speaker_section": speaker_section
     })
     
     return podcast_script
@@ -368,7 +427,29 @@ def save_wave_file(filename: str, pcm_data, channels: int = 1, rate: int = 24000
         wave_file.writeframes(audio_bytes)
 
 
-def generate_podcast_audio(podcast_script: str, video_id: str, output_folder: str = "data/audio") -> str:
+def parse_podcast_script(podcast_script: str, valid_names: set) -> list:
+    # Turn the script text into a list of (speaker_name, line_text) pairs.
+    # Each line looks like "Alex: some words" — split on the FIRST colon only.
+    segments = []
+
+    for raw_line in podcast_script.splitlines():
+        line = raw_line.strip()
+
+        if not line or ":" not in line:
+            continue
+
+        name, text = line.split(":", 1)
+        name = name.strip()
+        text = text.strip()
+
+        # Ignore stray lines whose prefix is not one of our real speakers.
+        if name in valid_names and text:
+            segments.append((name, text))
+
+    return segments
+
+
+def generate_podcast_audio(podcast_script: str, speakers: list, video_id: str, output_folder: str = "data/audio") -> str:
 
     if not podcast_script:
         raise ValueError("Podcast script is empty. Cannot generate podcast audio.")
@@ -376,38 +457,47 @@ def generate_podcast_audio(podcast_script: str, video_id: str, output_folder: st
     if not video_id:
         raise ValueError("Video ID is empty. Cannot name podcast file.")
 
-    # One voice config per speaker. The speaker names must match the names
-    # produced by MULTISPEAKER_PODCAST_PROMPT (Alex and Maya).
-    speaker_voice_configs = [
-        types.SpeakerVoiceConfig(
-            speaker=speaker,
-            voice_config=types.VoiceConfig(
-                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+    if not speakers:
+        raise ValueError("No speakers provided. Cannot generate podcast audio.")
+
+    # Map each speaker name to its voice, e.g. {"Alex": "Puck", "Maya": "Kore"}.
+    voice_by_name = {name: voice for name, role, voice in speakers}
+
+    segments = parse_podcast_script(podcast_script, set(voice_by_name.keys()))
+    if not segments:
+        raise ValueError("Could not find any speaker lines in the podcast script.")
+
+    # Gemini multi-speaker TTS supports only 2 voices, so to allow more speakers
+    # we synthesize ONE line at a time with that speaker's voice, then stitch the
+    # raw PCM chunks together. All chunks share the same 24 kHz / 16-bit format,
+    # so joining the bytes plays them back to back.
+    audio_chunks = []
+
+    for name, text in segments:
+        voice_name = voice_by_name[name]
+
+        response = genai_client.models.generate_content(
+            model=GEMINI_TTS_MODEL,
+            contents=text,
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+                    )
+                ),
             ),
         )
-        for speaker, voice_name in PODCAST_SPEAKER_VOICES.items()
-    ]
 
-    response = genai_client.models.generate_content(
-        model=GEMINI_TTS_MODEL,
-        contents=podcast_script,
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                multi_speaker_voice_config=types.MultiSpeakerVoiceConfig(
-                    speaker_voice_configs=speaker_voice_configs
-                )
-            ),
-        ),
-    )
+        pcm_chunk = response.candidates[0].content.parts[0].inline_data.data
+        audio_chunks.append(pcm_chunk)
 
-    # Gemini TTS returns raw PCM audio (24 kHz, 16-bit, mono).
-    pcm_data = response.candidates[0].content.parts[0].inline_data.data
+    full_audio = b"".join(audio_chunks)
 
     os.makedirs(output_folder, exist_ok=True)
     output_path = os.path.join(output_folder, f"{video_id}_podcast.wav")
 
-    save_wave_file(output_path, pcm_data)
+    save_wave_file(output_path, full_audio)
 
     return output_path
 
@@ -420,8 +510,17 @@ def generate_podcast_from_video(transcript: str, video_id: str, podcast_language
     if not video_id:
         raise ValueError("Video ID is empty. Cannot generate podcast.")
 
+    # 1. Let Gemini decide how many speakers (host + specialists) the content needs.
+    speakers = plan_speakers(transcript)
+
+    # 2. Summarize the transcript into study notes for the script writer.
     notes = generate_video_notes(transcript, podcast_language_code)
-    podcast_script = generate_multispeaker_podcast_script(notes, podcast_language_code)
-    audio_path = generate_podcast_audio(podcast_script, video_id, output_folder)
+
+    # 3. Write the dialogue for exactly those speakers.
+    podcast_script = generate_multispeaker_podcast_script(notes, speakers, podcast_language_code)
+
+    # 4. Synthesize each line and stitch into one audio file.
+    audio_path = generate_podcast_audio(podcast_script, speakers, video_id, output_folder)
 
     return audio_path, podcast_script
+
