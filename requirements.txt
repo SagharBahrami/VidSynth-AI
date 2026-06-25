@@ -12,3 +12,5 @@ langchain-text-splitters
 langchain-chroma
 langchain-core
 youtube-transcript-api
+rank-bm25
+langchain-community
