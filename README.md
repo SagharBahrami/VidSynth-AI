@@ -2,7 +2,7 @@
 
 VidSynth AI is an AI-powered Streamlit application that transforms YouTube videos into study notes, searchable video chat, and audio-assisted learning.
 
-Users can paste a YouTube URL, generate organized notes, chat with the video using RAG, ask questions by voice, and listen to audio versions of generated content.
+Users can paste a YouTube URL, generate organized notes, chat with the video using RAG with hybrid retrieval, ask questions by voice, generate a multi-speaker podcast, and listen to audio versions of generated content.
 
 ---
 
@@ -48,13 +48,15 @@ The chat flow is:
 YouTube transcript
 → Translate transcript if needed
 → Split transcript into chunks
-→ Store chunks in ChromaDB
+→ Store chunks in ChromaDB (dense) and build a BM25 index (sparse)
 → User asks a question
-→ Retrieve relevant chunks
-→ Gemini generates an answer
+→ Hybrid retrieval: dense + BM25 candidates fused with RRF
+→ Gemini generates an answer from the top chunks
 ```
 
 This helps the chatbot answer based on the video transcript instead of giving unrelated general answers.
+
+Retrieval is **hybrid**: it combines semantic (dense) search with keyword (BM25) search and merges the two rankings using Reciprocal Rank Fusion (RRF). See the [Hybrid Retrieval](#-hybrid-retrieval-dense--bm25--rrf) section for details.
 
 ---
 
@@ -163,9 +165,9 @@ YouTube URL
 → Fetch transcript
 → Translate transcript if needed
 → Split transcript into chunks
-→ Store chunks in ChromaDB
+→ Store chunks in ChromaDB (dense) and build a BM25 index (sparse)
 → User asks a typed or voice question
-→ Retrieve relevant chunks
+→ Hybrid retrieval (dense + BM25) fused with RRF, keep the top FINAL_K chunks
 → Generate answer with Gemini
 → Optionally generate audio answer
 ```
@@ -192,7 +194,8 @@ YouTube URL
 - Streamlit
 - LangChain
 - Google Gemini (text + multi-speaker text-to-speech)
-- ChromaDB
+- ChromaDB (dense vector search)
+- rank_bm25 (sparse keyword search for hybrid retrieval)
 - YouTube Transcript API
 - gTTS
 - SpeechRecognition
@@ -221,9 +224,9 @@ VidSynth-AI/
 | File | Purpose |
 |---|---|
 | `app.py` | Streamlit user interface and app workflow |
-| `services.py` | Transcript extraction, translation, RAG, audio generation, podcast generation, and speech-to-text functions |
+| `services.py` | Transcript extraction, translation, hybrid retrieval (dense + BM25 + RRF), RAG, audio generation, podcast generation, and speech-to-text functions |
 | `prompts.py` | Prompt templates for notes, translation, RAG answers, and the multi-speaker podcast script |
-| `config.py` | API keys, model names (including the Gemini TTS model and podcast speaker voices), chunk settings, and ChromaDB path |
+| `config.py` | API keys, model names (including the Gemini TTS model and podcast speaker voices), chunk settings, hybrid retrieval settings, and ChromaDB path |
 | `requirements.txt` | Python dependencies |
 
 ---
@@ -349,7 +352,8 @@ In VidSynth AI, RAG works like this:
 
 ### 1. Retrieval
 
-The app searches ChromaDB for transcript chunks related to the user's question.
+The app uses **hybrid retrieval** to find transcript chunks related to the user's question
+(see the [Hybrid Retrieval](#-hybrid-retrieval-dense--bm25--rrf) section below).
 
 ### 2. Augmented
 
@@ -360,6 +364,42 @@ The retrieved transcript chunks are added to the prompt.
 Gemini generates an answer using the retrieved transcript context.
 
 This allows the chatbot to answer questions based on the actual video content.
+
+---
+
+## 🔀 Hybrid Retrieval (Dense + BM25 + RRF)
+
+Instead of relying on a single search method, VidSynth AI combines two complementary ones:
+
+```text
+Dense  (ChromaDB vector search) → finds chunks by MEANING   (good for paraphrased questions)
+Sparse (BM25 keyword search)    → finds chunks by EXACT WORDS (good for names, terms, codes)
+```
+
+Each retriever proposes a set of candidate chunks. The two rankings are then merged with
+**Reciprocal Rank Fusion (RRF)**, which scores each chunk by its *rank* in each list
+(`1 / (RRF_K + rank)`) rather than by raw scores. This avoids the problem that a vector
+distance and a BM25 score are on completely different scales. A chunk ranked highly by
+**both** retrievers rises to the top.
+
+```text
+question
+  → dense search → CANDIDATE_K chunks  ┐
+  → BM25 search  → CANDIDATE_K chunks   ├─► RRF fuse & re-rank ─► keep top FINAL_K ─► Gemini
+                                        ┘
+```
+
+The relevant settings live in `config.py`:
+
+| Setting | Meaning |
+|---|---|
+| `CANDIDATE_K` | How many chunks **each** retriever proposes before fusion (wider = better quality, ~free) |
+| `FINAL_K` | How many fused chunks are sent to the LLM (lower = fewer tokens) |
+| `RRF_K` | RRF constant (default `60`, from the original RRF paper) |
+
+Because BM25 runs locally, hybrid retrieval adds no token cost. Token usage is controlled by
+`FINAL_K`: better retrieval means a small `FINAL_K` (e.g. `2`) usually answers as well as a
+larger dense-only `TOP_K` did, so fewer chunks reach the LLM.
 
 ---
 

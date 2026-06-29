@@ -5,6 +5,7 @@ from services import (generate_video_notes,
                       get_transcript,
                       chunk_transcript,
                       store_in_chromadb,
+                      build_bm25_index,
                       retrieve_relevant_chunks,
                       translate_transcript_to_language_code,
                       get_transcript_language_code,
@@ -30,6 +31,9 @@ if "notes_result" not in st.session_state:
     st.session_state.notes_result = None
 if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
+
+if "bm25_index" not in st.session_state:
+    st.session_state.bm25_index = None
 
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = []
@@ -209,6 +213,10 @@ if start_button:
                 st.session_state.vector_store = store_in_chromadb(
                     st.session_state.chunks,
                     st.session_state.video_id
+                )
+                # Sparse (keyword) index for hybrid retrieval, built from the same chunks.
+                st.session_state.bm25_index = build_bm25_index(
+                    st.session_state.chunks
                 )
 
             st.session_state.video_ready_for_chat = True
@@ -394,7 +402,9 @@ elif task_type == "Chat with Video":
                 with st.spinner("Searching the video and generating answer..."):
                     relevant_chunks = retrieve_relevant_chunks(
                         user_question,
-                        st.session_state.vector_store
+                        st.session_state.vector_store,
+                        st.session_state.bm25_index,
+                        st.session_state.chunks
                     )
 
                     answer = generate_rag_answer(

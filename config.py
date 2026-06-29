@@ -14,6 +14,21 @@ CHUNK_OVERLAP = 150
 TOP_K = 3
 
 # -------------------------
+# HYBRID RETRIEVAL (dense + BM25 + RRF) SETTINGS
+# -------------------------
+
+# How many candidate chunks EACH retriever (dense and BM25) proposes before fusion.
+CANDIDATE_K = 5
+
+# How many fused chunks we actually send to the LLM. Lower = fewer tokens.
+# Hybrid retrieval surfaces the right chunk more reliably, so a small number here
+# usually answers as well as a larger TOP_K did with dense-only retrieval.
+FINAL_K = 2
+
+# RRF constant. 60 is the standard value from the original Reciprocal Rank Fusion paper.
+RRF_K = 60
+
+# -------------------------
 # CHROMADB SETTINGS
 # -------------------------
 

@@ -8,7 +8,10 @@ from config import (GEMINI_MODEL,
                     EMBEDDING_MODEL,
                     GOOGLE_API_KEY,
                     GEMINI_TTS_MODEL,
-                    PODCAST_SPEAKER_VOICES
+                    PODCAST_SPEAKER_VOICES,
+                    CANDIDATE_K,
+                    FINAL_K,
+                    RRF_K
                     )
 
 from prompts import RAG_PROMPT, NOTES_PROMPT, TRANSLATION_PROMPT, MULTISPEAKER_PODCAST_PROMPT, SPEAKER_PLAN_PROMPT
@@ -20,6 +23,8 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
+
+from rank_bm25 import BM25Okapi
 
 from gtts import gTTS
 from gtts.lang import tts_langs
@@ -172,12 +177,54 @@ def store_in_chromadb(chunks: list[Document], video_id: str) -> Chroma:
     return vector_store
 
 
-def retrieve_relevant_chunks(question: str, vector_store: Chroma) -> list[Document]:
-    relevant_chunks = vector_store.similarity_search(
-        question,
-        k=TOP_K
-    )
-    return relevant_chunks
+def build_bm25_index(chunks: list[Document]) -> BM25Okapi:
+    # BM25 is a keyword (sparse) ranking algorithm. It needs the corpus tokenized
+    # into lists of words. We lowercase and split on whitespace so matching is
+    # case-insensitive. The index order matches the `chunks` list order, which is
+    # how we map scores back to the original Documents later.
+    tokenized_corpus = [chunk.page_content.lower().split() for chunk in chunks]
+    return BM25Okapi(tokenized_corpus)
+
+
+def bm25_search(question: str, bm25: BM25Okapi, chunks: list[Document], k: int) -> list[Document]:
+    # Score every chunk against the question, then return the k highest-scoring.
+    tokenized_query = question.lower().split()
+    scores = bm25.get_scores(tokenized_query)
+
+    # Rank chunk positions by score (highest first), then map back to Documents.
+    ranked_indices = sorted(range(len(chunks)), key=lambda i: scores[i], reverse=True)
+    return [chunks[i] for i in ranked_indices[:k]]
+
+
+def reciprocal_rank_fusion(ranked_lists: list[list[Document]], rrf_k: int = RRF_K, top_k: int = FINAL_K) -> list[Document]:
+    # RRF merges several ranked lists by RANK, not score, so we never have to make
+    # a vector distance and a BM25 score comparable. Each document earns
+    # 1 / (rrf_k + rank) from every list it appears in; we sum those contributions.
+    # A document ranked highly by BOTH retrievers ends up on top.
+    scores = {}
+    docs_by_key = {}
+
+    for ranked in ranked_lists:
+        for rank, doc in enumerate(ranked):
+            key = doc.page_content  # identify a chunk by its text
+            docs_by_key[key] = doc
+            scores[key] = scores.get(key, 0.0) + 1.0 / (rrf_k + rank + 1)
+
+    ordered_keys = sorted(scores, key=lambda key: scores[key], reverse=True)
+    return [docs_by_key[key] for key in ordered_keys[:top_k]]
+
+
+def retrieve_relevant_chunks(question: str, vector_store: Chroma, bm25: BM25Okapi, chunks: list[Document]) -> list[Document]:
+    # Dense (semantic) candidates from the vector store.
+    dense_results = vector_store.similarity_search(question, k=CANDIDATE_K)
+
+    # Sparse (keyword) candidates from BM25.
+    sparse_results = bm25_search(question, bm25, chunks, k=CANDIDATE_K)
+
+    # Fuse both rankings with RRF and keep only the top FINAL_K. Sending fewer,
+    # better chunks to the LLM is what actually reduces token consumption.
+    fused_results = reciprocal_rank_fusion([dense_results, sparse_results])
+    return fused_results
 
 
 notes_prompt = ChatPromptTemplate.from_template(NOTES_PROMPT)
